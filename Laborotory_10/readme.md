@@ -2,7 +2,8 @@
 
 #### Был создан главный файл app.py
 
-```from flask import Flask, request, jsonify, render_template
+```
+from flask import Flask, request, jsonify, render_template
 from PIL import Image, ImageDraw, ImageFont
 import io
 import base64
@@ -11,28 +12,29 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return render_template('makeimage.html')
+    return "Hello, User!"
 
 @app.route('/login')
 def login():
     return jsonify({"author": "1147335"})
 
-@app.route('/makeimage', methods=['POST'])
+@app.route('/makeimage', methods=['POST', 'GET'])
 def make_image():
+    if request.method == "GET":
+        return render_template('makeimage.html')
+
     width = request.form.get('width')
     height = request.form.get('height')
     text = request.form.get('text')
 
-    # Проверяем корректность параметров изображения
     if not width.isdigit() or not height.isdigit() or int(width) <= 0 or int(height) <= 0:
-        return render_template('makeimage.html', message="Invalid image size")
+        return jsonify({'error': 'Invalid image size'}), 400
 
     width, height = int(width), int(height)
 
-    image = Image.new('RGB', (width, height), color=(0, 0, 255, 255))
+    image = Image.new('RGB', (width, height), color=(0, 0, 255))
     draw = ImageDraw.Draw(image)
 
-    # Используем стандартный шрифт
     font = ImageFont.load_default()
     draw.text((10, 10), text, fill=(0, 0, 0), font=font)
 
@@ -42,8 +44,11 @@ def make_image():
 
     encoded_img = base64.b64encode(img_bytes.getvalue()).decode('utf-8')
 
-    # Возвращаем HTML
-    return render_template('display_image.html', image_data=encoded_img)
+    return jsonify({'image': encoded_img})
+
+@app.route('/result')
+def result():
+    return render_template('result.html')
 
 if __name__ == '__main__':
     app.run(debug=True)
@@ -83,47 +88,48 @@ if __name__ == '__main__':
     </div>
 
     <script>
-        new Vue({
-            el: '#app',
-            data: {
-                width: '',
-                height: '',
-                text: '',
-                imageData: null,
-                message: null
-            },
-            methods: {
-                async generateImage() {
-                    this.message = null; // Сброс сообщения об ошибке
-                    const response = await fetch('/makeimage', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                        },
-                        body: new URLSearchParams({
-                            width: this.width,
-                            height: this.height,
-                            text: this.text
-                        })
-                    });
+    new Vue({
+        el: '#app',
+        data: {
+            width: '',
+            height: '',
+            text: '',
+            imageData: null,
+            message: null
+        },
+        methods: {
+            async generateImage() {
+                this.message = null;
 
-                    const data = await response.text();
-                    const parser = new DOMParser();
-                    const htmlDoc = parser.parseFromString(data, 'text/html');
+                const response = await fetch('/makeimage', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: new URLSearchParams({
+                        width: this.width,
+                        height: this.height,
+                        text: this.text
+                    })
+                });
 
-                    const imgElement = htmlDoc.querySelector('img');
-
-                    if (imgElement) {
-                        this.imageData = imgElement.src; // Устанавливаем источник изображения
-                    } else {
-                        // Обрабатываем сообщение об ошибке
-                        this.message = htmlDoc.querySelector('p').textContent;
-                        this.imageData = null; // Сбрасываем изображение
-                    }
+                if (!response.ok) {
+                    const errorText = await response.json();
+                    this.message = errorText.error;
+                    return;
                 }
+
+                const data = await response.json();
+
+                // Сохраняем изображение в sessionStorage
+                sessionStorage.setItem('imageData', data.image);
+
+                // Переход на страницу результата
+                window.location.href = '/result';
             }
-        });
-    </script>
+        }
+    });
+</script>
 </body>
 </html>
 ```
@@ -131,19 +137,29 @@ if __name__ == '__main__':
 #### И файл display_image.html
 
 ```
-<!-- templates/display_image.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Image Display</title>
+    <title>Result Image</title>
 </head>
 <body>
     <h1>Generated Image</h1>
-    <img src="data:image/jpeg;base64,{{ image_data }}" alt="Generated Image">
+    <img id="result-image" alt="Generated Image">
     <br>
     <a href="/">Back</a>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const data = sessionStorage.getItem('imageData');
+            if (data) {
+                document.getElementById('result-image').src = 'data:image/jpeg;base64,' + data;
+            } else {
+                document.body.innerHTML = '<p style="color: red;">No image data found. Please create an image first.</p><a href="/">Back</a>';
+            }
+        });
+    </script>
 </body>
 </html>
+
 ```

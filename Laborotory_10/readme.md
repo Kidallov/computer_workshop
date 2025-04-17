@@ -10,22 +10,22 @@ import base64
 
 app = Flask(__name__)
 
-@app.route('/')
+@app.route('/') # корневой маршрут
 def home():
     return "Hello, User!"
 
-@app.route('/login')
+@app.route('/login') # маршрут с логином
 def login():
     return jsonify({"author": "1147335"})
 
-@app.route('/makeimage', methods=['POST', 'GET'])
+@app.route('/makeimage', methods=['POST', 'GET']) # маршрут, где создаем изображение
 def make_image():
     if request.method == "GET":
-        return render_template('makeimage.html')
+        return render_template('makeimage.html') # возвращаем .html документ, когда запрашиваем GET запрос
 
-    width = request.form.get('width')
-    height = request.form.get('height')
-    text = request.form.get('text')
+    width = request.form.get('width')    #|
+    height = request.form.get('height')  #| поля, куда вводим наши значения
+    text = request.form.get('text')      #|
 
     if not width.isdigit() or not height.isdigit() or int(width) <= 0 or int(height) <= 0:
         return jsonify({'error': 'Invalid image size'}), 400

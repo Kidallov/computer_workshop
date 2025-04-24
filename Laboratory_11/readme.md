@@ -120,7 +120,7 @@ app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024
 Генерация приватного и публичного ключей
 ```
 private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    public_key = private_key.public_key()
+public_key = private_key.public_key()
 ```
 
 #### Файл `decypher.html`

@@ -6,7 +6,7 @@
 Лабораторная_работа_10/
 ├── app.py
 ├── static/
-│   ├── styles/
+│   └── styles/
 │       └── makeimage.css
 │       └── result.css
 ├── templates/

@@ -6,11 +6,11 @@
 Лабораторная_работа_10/
 ├── app.py
 ├── static/
-│   ├── styles/
+│   └── styles/
 │       └── decypher.css
 │       └── encrypt.css
 ├── templates/
-│   └── index.html
+│   └── decypher.html
 │   └── encrypt.html
 ```
 
@@ -19,52 +19,92 @@
 #### Главный файл `app.py`
 
 ```
-from flask import Flask, request, jsonify, render_template
-from PIL import Image, ImageDraw, ImageFont
-import io
-import base64
+from flask import Flask, jsonify, request, render_template, send_file
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from io import BytesIO
 
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return render_template('hello_user.html')
+app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024
+
+@app.route('/decypher')
+def decypher_page():
+    return render_template('decypher.html')
+
+@app.route('/encrypt')
+def encrypt_page():
+    return render_template('encrypt.html')
 
 @app.route('/login')
 def login():
     return jsonify({"author": "1147335"})
 
-@app.route('/makeimage', methods=['POST', 'GET'])
-def make_image():
-    if request.method == "GET":
-        return render_template('makeimage.html')
+@app.route('/generate_keys', methods=['POST'])
+def generate_keys():
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = private_key.public_key()
 
-    width = request.form.get('width')
-    height = request.form.get('height')
-    text = request.form.get('text')
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption()
+    )
+    public_pem = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    )
 
-    if not width.isdigit() or not height.isdigit() or int(width) <= 0 or int(height) <= 0:
-        return jsonify({'error': 'Invalid image size'}), 400
+    return jsonify({
+        "private_key": private_pem.decode('utf-8'),
+        "public_key": public_pem.decode('utf-8')
+    })
 
-    width, height = int(width), int(height)
+@app.route('/encrypt_message', methods=['POST'])
+def encrypt_message():
+    data = request.get_json()
+    public_key_str = data.get('public_key')
+    message = data.get('message')
 
-    image = Image.new('RGB', (width, height), color=(0, 0, 255))
-    draw = ImageDraw.Draw(image)
+    if not public_key_str or not message:
+        return jsonify({"error": "Both public key and message are required"}), 400
 
-    font = ImageFont.load_default()
-    draw.text((10, 10), text, fill=(0, 0, 0), font=font)
+    try:
+        public_key = serialization.load_pem_public_key(public_key_str.encode('utf-8'))
 
-    img_bytes = io.BytesIO()
-    image.save(img_bytes, format='JPEG')
-    img_bytes.seek(0)
+        encrypted = public_key.encrypt(
+            message.encode('utf-8'),
+            padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
+        )
 
-    encoded_img = base64.b64encode(img_bytes.getvalue()).decode('utf-8')
+        return send_file(BytesIO(encrypted), mimetype='application/octet-stream', as_attachment=True, download_name='secret.bin')
 
-    return jsonify({'image': encoded_img})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-@app.route('/result')
-def result():
-    return render_template('result.html')
+@app.route('/decypher', methods=['POST'])
+def decypher():
+    if 'key' not in request.files or 'secret' not in request.files:
+        return jsonify({"error": "Both key and secret fields are required"}), 400
+
+    key_file = request.files['key']
+    secret_file = request.files['secret']
+
+    try:
+        private_key_data = key_file.read()
+        private_key = serialization.load_pem_private_key(private_key_data, password=None)
+
+        encrypted_data = secret_file.read()
+
+        decrypted = private_key.decrypt(
+            encrypted_data,
+            padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
+        )
+
+        return decrypted.decode('utf-8'), 200, {'Content-Type': 'text/plain'}
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
@@ -72,339 +112,161 @@ if __name__ == '__main__':
 
 ### Комментарии к файлу `app.py`:
 
+Ставим ограничение на 2MB
 ```
-@app.route('/')                               |
-def home():                                   | корневой маршрут, в котором возвращается страница для приветстования пользователя
-    return render_template('hello_user.html') |
-```
-
-```
-@app.route('/login')                      |
-def login():                              | маршрут, по которому отображается мой логин в системе Moodle
-    return jsonify({"author": "1147335"}) |
+app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024
 ```
 
+Генерация приватного и публичного ключей
 ```
-    width = request.form.get('width')    |
-    height = request.form.get('height')  | поля, которые работают с нашими значениями
-    text = request.form.get('text')      |
-```
-
-```
-    if not width.isdigit() or not height.isdigit() or int(width) <= 0 or int(height) <= 0: | проверяем на корректность данных и в
-        return jsonify({'error': 'Invalid image size'}), 400                               | случае ошибки возвращаем об этом сообщение
+private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = private_key.public_key()
 ```
 
-```
-    img_bytes = io.BytesIO()
-    image.save(img_bytes, format='JPEG') | перевод изображения в байты и сохранение в формате JPEG, а также перевод указателя в начале для последуещего чтения
-    img_bytes.seek(0)
-```
-
-```
-    encoded_img = base64.b64encode(img_bytes.getvalue()).decode('utf-8') | кодирует байтовые данные и и записывается результат в эту переменную
-```
-
-```
-@app.route('/result')                       |
-def result():                               |  по этому пути мы получаем изображение (на новой странице, как сказано в задании)
-    return render_template('result.html')   |
-```
-
-```
-if __name__ == '__main__':   | запускаем наш проект и 
-    app.run(debug=True)      | смотрим с помощью отладки где ошибки, если они появляются
-```
-
-#### Файл `makeimage.html`
+#### Файл `decypher.html`
 
 ```
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Создание изображения</title>
-    <script src="https://cdn.jsdelivr.net/npm/vue@2"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles/makeimage.css') }}">
+  <meta charset="UTF-8">
+  <title>Расшифровка</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles/decypher.css') }}">
 </head>
 <body>
-    <div id="app">
-        <h1>Создание изображения</h1>
-        <form @submit.prevent="generateImage">
-            <label for="width">Ширина изображения:</label>
-            <input type="text" v-model="width" id="width" required>
-            <br>
-            <label for="height">Высота изображения:</label>
-            <input type="text" v-model="height" id="height" required>
-            <br>
-            <label for="text">Текст на изображении:</label>
-            <input type="text" v-model="text" id="text" required>
-            <br>
-            <input type="submit" value="Generate Image">
-        </form>
-        <p v-if="message" style="color: red;">Invalid image size</p>
-        <div v-if="imageData">
-            <h2>Создать</h2>
-            <img :src="imageData" alt="Generated Image">
-        </div>
-    </div>
+  <h1>Расшифровка с помощью приватного ключа</h1>
 
-    <script>
-    new Vue({
-        el: '#app',
-        data: {
-            width: '',
-            height: '',
-            text: '',
-            imageData: null,
-            message: false
-        },
-        methods: {
-            async generateImage() {
-                const response = await fetch('/makeimage', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
-                    body: new URLSearchParams({
-                        width: this.width,
-                        height: this.height,
-                        text: this.text
-                    })
-                });
+  <form id="decypher-form">
+    <label>Приватный ключ (key):</label><br>
+    <input type="file" name="key" required><br><br>
 
-                if (!response.ok) {
-                    this.message = true;
-                    return;
-                }
+    <label>Зашифрованный файл (secret):</label><br>
+    <input type="file" name="secret" required><br><br>
 
-                const data = await response.json();
-                this.message = false;
-                sessionStorage.setItem('imageData', data.image);
-                window.location.href = '/result';
-            }
-        }
+    <button type="submit">Расшифровать</button>
+  </form>
+
+  <div class="result" id="result"></div>
+
+  <script>
+    const form = document.getElementById('decypher-form');
+    const resultDiv = document.getElementById('result');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const formData = new FormData(form);
+      resultDiv.textContent = 'Расшифровка...';
+
+      try {
+        const response = await fetch('/decypher', {
+          method: 'POST',
+          body: formData
+        });
+
+        const text = await response.text();
+        resultDiv.textContent = text;
+      } catch (err) {
+        resultDiv.textContent = 'Ошибка: ' + err.message;
+      }
     });
-</script>
+  </script>
 </body>
 </html>
-```
-
-### Комментарии по файлу `makeimage.html`
 
 ```
-<script src="https://cdn.jsdelivr.net/npm/vue@2"></script> | испорт фреймоврка Vue
-```
 
-```
-<link rel="stylesheet" href="{{ url_for('static', filename='styles/makeimage.css') }}"> | подключаем css стили
+### Комментарии по файлу `decypher.html`
+
 ```
 
 ```
-el: '#app', | работает с элементом `app`
-        data: | в этом месте отображаются данные, которые мы заносим
-methods: | вызываем метод
-
-if (!response.ok) {
-    this.message = true;
-    return;
-} | если ошибка, то переводим флаг переменной message в true и отображаем сообщение
-```
 
 
-#### Файл `result.html`
+#### Файл `encrypt.html`
 
 ```
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <title>Созданное изображение</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles/result.css') }}">
+  <meta charset="UTF-8">
+  <title>Генерация и шифрование</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles/encrypt.css') }}">
 </head>
 <body>
-    <h1>Созданное изображение</h1>
-    <img id="result-image" alt="Generated Image">
-    <br>
-    <a href="/">Вернуться на главный экран</a>
+  <h1>Генерация ключей</h1>
+  <button onclick="generateKeys()">Сгенерировать</button>
 
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const data = sessionStorage.getItem('imageData');
-            if (data) {
-                document.getElementById('result-image').src = 'data:image/jpeg;base64,' + data;
-            } else {
-                document.body.innerHTML = '<p style="color: red;">Данные изображения не найдены. Пожалуйста, сначала создайте изображение.</p><a href="/">Вернуться на главный экран</a>';
-            }
-        });
-    </script>
+  <h3>Приватный ключ</h3>
+  <textarea id="private"></textarea>
+  <h3>Публичный ключ</h3>
+  <textarea id="public"></textarea>
+
+  <h1>Шифрование сообщения</h1>
+  <textarea id="message" placeholder="Введите сообщение..."></textarea><br>
+  <button onclick="encrypt()">Зашифровать и скачать</button>
+
+  <div class="result" id="result"></div>
+
+  <script>
+    async function generateKeys() {
+      const response = await fetch('/generate_keys', { method: 'POST' });
+      const data = await response.json();
+      document.getElementById('private').value = data.private_key;
+      document.getElementById('public').value = data.public_key;
+    }
+
+    async function encrypt() {
+      const message = document.getElementById('message').value;
+      const publicKey = document.getElementById('public').value;
+
+      const response = await fetch('/encrypt_message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ public_key: publicKey, message: message })
+      });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'secret.bin';
+        a.click();
+      } else {
+        const error = await response.json();
+        document.getElementById('result').textContent = error.error || 'Ошибка шифрования';
+      }
+    }
+  </script>
 </body>
 </html>
-```
-
-### Комментарии к `result.html`
 
 ```
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const data = sessionStorage.getItem('imageData'); | считывает сохраненное изображение, которое мы сохранили в файле `makeimage.html`
-            if (data) {
-                document.getElementById('result-image').src = 'data:image/jpeg;base64,' + data; | загружаем данные
-            } else {
-                document.body.innerHTML = '<p style="color: red;">Данные изображения не найдены. Пожалуйста, сначала создайте изображение.</p><a href="/">Вернуться на главный экран</a>'; | если данных нет, выводим сообщение
-            }
-        });
-    </script>
-```
 
-## CSS стили для каждого файла
-
-### `makeimage.css`
+### Комментарии к `encrypt.html`
 
 ```
-body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background-color: #f4f4f4;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
-    min-height: 100vh;
-    padding-top: 40px;
-}
-
-#app {
-    background-color: #ffffff;
-    padding: 30px 40px;
-    border-radius: 12px;
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
-    max-width: 480px;
-    width: 100%;
-}
-
-h1 {
-    color: #2c3e50;
-    text-align: center;
-    margin-bottom: 25px;
-    font-size: 28px;
-}
-
-form {
-    display: flex;
-    flex-direction: column;
-}
-
-label {
-    margin-bottom: 6px;
-    color: #2c3e50;
-    font-weight: 600;
-}
-
-input[type="text"] {
-    padding: 10px;
-    margin-bottom: 20px;
-    border: 1px solid #ccc;
-    border-radius: 8px;
-    font-size: 16px;
-}
-
-input[type="submit"] {
-    background-color: #2c3e50;
-    color: white;
-    padding: 12px;
-    border: none;
-    border-radius: 8px;
-    font-size: 16px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background-color 0.3s ease;
-}
-
-input[type="submit"]:hover {
-    background-color: #1a252f;
-}
-
-p {
-    margin-bottom: 15px;
-    text-align: center;
-}
-
-img {
-    margin-top: 20px;
-    max-width: 100%;
-    border-radius: 10px;
-    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.1);
-}
-
-h2 {
-    text-align: center;
-    color: #34495e;
-}
-```
-
-### `result.css`
 
 ```
-body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background-color: #f9f9f9;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    min-height: 100vh;
-    justify-content: center;
-}
 
-h1 {
-    color: #2c3e50;
-    margin-bottom: 20px;
-    font-size: 32px;
-    text-align: center;
-}
+## CSS стили для каждого файла (не является обязательным)
 
-#result-image {
-    max-width: 90%;
-    max-height: 70vh;
-    border-radius: 12px;
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.1);
-    margin-bottom: 30px;
-}
+### `decypher.css`
 
-a {
-    display: inline-block;
-    padding: 10px 20px;
-    background-color: #2c3e50;
-    color: white;
-    text-decoration: none;
-    border-radius: 8px;
-    font-weight: 600;
-    transition: background-color 0.3s ease;
-}
+```
 
-a:hover {
-    background-color: #1a252f;
-}
+```
 
-p {
-    color: red;
-    font-size: 18px;
-    margin-bottom: 20px;
-    text-align: center;
-}
+### `encrypt.css`
+
+```
+
 ```
 
 
 ## Комментарии по всей лабораторной работе
 
-1. Я не стал создавать отдельные `JS` файлы для каждого `.html` файла, хотя было бы правильным сделать именно так, но тут код на пару строк, поэтому можно обойтись таким способом.
-2. Для файла `hello_user.html` я не создал отдельный `.css` файл, потому что там код маленьким и не требует отдельного файла, как другие `.html` файлы.
-3. Была реализована задача вывода логина ` Формат ответа по маршруту /login {"author": "__ваш логин__"} `
-4. Была реализована задача ` Если переданы неверные параметры размеров изображения, возвращать сообщение в переменной message "Invalid image size" на ту же самую страницу makeimage.html снова с формой для генерации картинки. ` с переводом флагов true и false.
-5. Была реализована задача `Вывод и отображение самого изображения на страницу с формой (без перезагрузки страницы, асинхронно) или другую страницу как thumbnail.`
-6. Была реализована задача `Реализация фронтэнда и отправка данных на сервер с использованием какого-либо фронтэнд-фреймворка.` с помощью Vue.
+
 
 

@@ -7,8 +7,8 @@
 ├── app.py
 ├── static/
 │   ├── styles/
-│   └── makeimage.css
-│   └── result.css
+│       └── makeimage.css
+│       └── result.css
 ├── templates/
 │   └── makeimage.html
 │   └── result.html
